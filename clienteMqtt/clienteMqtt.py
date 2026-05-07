@@ -53,7 +53,6 @@ async def main():
         port=8883,
         tls_context=tls_context,
     ) as client:
-        
         # Suscripción a los tópicos
         await client.subscribe(os.environ['TOPICOSUB1'])
         await client.subscribe(os.environ['TOPICOSUB2'])
