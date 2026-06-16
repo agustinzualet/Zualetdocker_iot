@@ -4,28 +4,40 @@
 <head>
   <meta charset="UTF-8" />
   <title>FLASK CRUD 1.6</title>
-  <!-- <link rel="stylesheet" href="https://bootswatch.com/5/cosmo/bootstrap.min.css"> -->
-  <link rel="stylesheet" href="https://bootswatch.com/5/darkly/bootstrap.min.css">
-  {% with messages = get_flashed_messages() %} {% if messages %}
-  {% for message in messages %}
-  <div class="alert alert-success alert-dismissible fade show" role="alert">
-    <strong>{{ message }}
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-  </div>
-  {% endfor %}
-  {% endif %} {% endwith %}
+  <link id="theme-style" rel="stylesheet" href="https://bootswatch.com/5/cosmo/bootstrap.min.css">
+  <script>
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    if (savedTheme === 'dark') {
+        document.getElementById('theme-style').href = "https://bootswatch.com/5/darkly/bootstrap.min.css";
+    }
+  </script>
+
+  {% with messages = get_flashed_messages() %} 
+    {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <strong>{{ message }}</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+      {% endfor %}
+    {% endif %} 
+  {% endwith %}
+
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container-fluid">
       <a class="navbar-brand" href="#">CRUD</a>
       {% if session.get("user_id") %}
-      <div class="d-flex">
-        <div class="nav-item pe-3 pt-2">{{ session.get("user_id") }}</div>
+      <div class="d-flex align-items-center">
+        <select id="themeSelector" class="form-select form-select-sm me-3" style="width: auto; cursor: pointer;">
+            <option value="light">Claro</option>
+            <option value="dark">Oscuro</option>
+        </select>
+        <div class="nav-item pe-3 text-white">{{ session.get("user_id") }}</div>
         <a href="{{url_for('logout')}}" class="btn btn-secondary my-2 my-sm-0" type="submit">Salir</a>
       </div>
       {% endif %}
     </div>
   </nav>
-
 </head>
 
 <body>
@@ -36,7 +48,26 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js" 
           integrity="sha384-j1CDi7MgGQ12Z7Qab0qlWQ/Qqz24Gc6BM0thvEMVjHnfYGF0rmFCozFSxQBxwHKO" 
           crossorigin="anonymous"></script>
-
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const themeSelector = document.getElementById('themeSelector');
+        const themeStyle = document.getElementById('theme-style');
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        if (themeSelector) {
+            themeSelector.value = currentTheme;
+            themeSelector.addEventListener('change', function(e) {
+                const newTheme = e.target.value;
+                localStorage.setItem('theme', newTheme); 
+                if (newTheme === 'dark') {
+                    themeStyle.href = "https://bootswatch.com/5/darkly/bootstrap.min.css";
+                } else {
+                    themeStyle.href = "https://bootswatch.com/5/cosmo/bootstrap.min.css";
+                }
+            });
+        }
+    });
+  </script>
   <script src="{{url_for('static', filename='js/main.js')}}"></script>
 </body>
 </html>
+
