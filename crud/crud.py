@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_mysqldb import MySQL
 import os, logging
+import paho.mqtt.publish as publish
 from functools import wraps
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-logging.basicConfig(format='%(asctime)s - CRUD - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - IoT Panel - %(levelname)s - %(message)s', level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -21,7 +22,7 @@ app.config["MYSQL_HOST"] = os.environ["MYSQL_HOST"]
 app.config['PERMANENT_SESSION_LIFETIME']=180
 mysql = MySQL(app)
 
-# rutas
+# --- MIDDLEWARE DE AUTENTICACIÓN ---
 
 def require_login(f):
     @wraps(f)
@@ -31,25 +32,23 @@ def require_login(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# --- RUTAS DE USUARIOS ---
+
 @app.route("/registrar", methods=["GET", "POST"])
 def registrar():
     """Registrar usuario"""
     if request.method == "POST":
-
-        # Ensure username was submitted
         if not request.form.get("usuario"):
-            return "el campo usuario es oblicatorio"
-
-        # Ensure password was submitted
+            return "El campo usuario es obligatorio"
         elif not request.form.get("password"):
-            return "el campo contraseña es oblicatorio"
+            return "El campo contraseña es obligatorio"
 
-        passhash=generate_password_hash(request.form.get("password"), method='scrypt', salt_length=16)
+        passhash = generate_password_hash(request.form.get("password"), method='scrypt', salt_length=16)
         cur = mysql.connection.cursor()
         cur.execute("INSERT INTO usuarios (usuario, hash) VALUES (%s,%s)", (request.form.get("usuario"), passhash[17:]))
         if mysql.connection.affected_rows():
-            flash('Se agregó un usuario')  # usa sesión
-            logging.info("se agregó un usuario")
+            flash('Se agregó un nuevo usuario al sistema')
+            logging.info("Se agregó un usuario")
         mysql.connection.commit()
         return redirect(url_for('index'))
 
@@ -58,90 +57,73 @@ def registrar():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        # Ensure username was submitted
         if not request.form.get("usuario"):
-            return "el campo usuario es oblicatorio"
-        # Ensure password was submitted
+            return "El campo usuario es obligatorio"
         elif not request.form.get("password"):
-            return "el campo contraseña es oblicatorio"
+            return "El campo contraseña es obligatorio"
 
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM usuarios WHERE usuario LIKE %s", (request.form.get("usuario"),))
-        rows=cur.fetchone()
+        rows = cur.fetchone()
         if(rows):
-            if (check_password_hash('scrypt:32768:8:1$' + rows[2],request.form.get("password"))):
+            if (check_password_hash('scrypt:32768:8:1$' + rows[2], request.form.get("password"))):
                 session.permanent = True
-                session["user_id"]=request.form.get("usuario")
-                logging.info("se autenticó correctamente")
+                session["user_id"] = request.form.get("usuario")
+                logging.info("Se autenticó correctamente")
                 return redirect(url_for('index'))
             else:
-                flash('usuario o contraseña incorrecto')
+                flash('Usuario o contraseña incorrecto')
                 return redirect(url_for('login'))
     return render_template('login.html')
-
-@app.route('/')
-@require_login
-def index():
-    cur = mysql.connection.cursor()
-    cur.execute('SELECT * FROM contactos')
-    datos = cur.fetchall()
-    cur.close()
-    return render_template('index.html', contactos = datos)
-
-@app.route('/add_contact', methods=['POST'])
-@require_login
-def add_contact():
-    if request.method == 'POST':
-        nombre = request.form['nombre']
-        tel = request.form['tel']
-        email = request.form['email']
-        cur = mysql.connection.cursor()
-        cur.execute("INSERT INTO contactos (nombre, tel, email) VALUES (%s,%s,%s)"
-                    , (nombre, tel, email))
-        if mysql.connection.affected_rows():
-            flash('Se agregó un contacto')  # usa sesión
-            logging.info("se agregó un contacto")
-            mysql.connection.commit()
-    return redirect(url_for('index'))
-
-@app.route('/borrar/<string:id>', methods = ['GET'])
-@require_login
-def borrar_contacto(id):
-    cur = mysql.connection.cursor()
-    cur.execute('DELETE FROM contactos WHERE id = %s', (id,))
-    if mysql.connection.affected_rows():
-        flash('Se eliminó un contacto')  # usa sesión
-        logging.info("se eliminó un contacto")
-        mysql.connection.commit()
-    return redirect(url_for('index'))
-
-@app.route('/editar/<id>', methods = ['GET'])
-@require_login
-def conseguir_contacto(id):
-    cur = mysql.connection.cursor()
-    cur.execute('SELECT * FROM contactos WHERE id = %s', (id,))
-    datos = cur.fetchone()
-    logging.info(datos)
-    return render_template('editar-contacto.html', contacto = datos)
-
-@app.route('/actualizar/<id>', methods=['POST'])
-@require_login
-def actualizar_contacto(id):
-    if request.method == 'POST':
-        nombre = request.form['nombre']
-        tel = request.form['tel']
-        email = request.form['email']
-        cur = mysql.connection.cursor()
-        cur.execute("UPDATE contactos SET nombre=%s, tel=%s, email=%s WHERE id=%s", (nombre, tel, email, id))
-    if mysql.connection.affected_rows():
-        flash('Se actualizó un contacto')  # usa sesión
-        logging.info("se actualizó un contacto")
-        mysql.connection.commit()
-    return redirect(url_for('index'))
 
 @app.route("/logout")
 @require_login
 def logout():
     session.clear()
-    logging.info("el usuario {} cerró su sesión".format(session.get("user_id")))
+    logging.info("El usuario {} cerró su sesión".format(session.get("user_id")))
+    return redirect(url_for('index'))
+
+# --- RUTAS PRINCIPALES E IOT ---
+
+@app.route('/')
+@require_login
+def index():
+    # Ya no cargamos contactos, solo renderizamos el dashboard
+    return render_template('index.html')
+
+@app.route('/comando_iot', methods=['POST'])
+@require_login
+def comando_iot():
+    """Ruta para controlar los nodos IoT vía MQTT"""
+    nodo_mac = request.form.get('nodo_mac')
+    accion = request.form.get('accion')
+
+    mqtt_host = "mosquitto" 
+    mqtt_user = os.environ.get("MQTT_USR")
+    mqtt_pass = os.environ.get("MQTT_PASS")
+
+    auth = {'username': mqtt_user, 'password': mqtt_pass} if mqtt_user else None
+
+    try:
+        if accion == 'destello':
+            topic = f"{nodo_mac}/destello"
+            publish.single(topic, payload="destello", hostname=mqtt_host, port=1883, auth=auth)
+            
+            flash('Orden de destello enviada a la placa')
+            logging.info(f"Comando de destello MQTT enviado al nodo {nodo_mac}")
+
+        elif accion == 'setpoint':
+            nuevo_setpoint = request.form.get('setpoint_val')
+            if nuevo_setpoint:
+                topic = f"{nodo_mac}/setpoint"
+                nuevo_setpoint_str = str(float(nuevo_setpoint.replace(",", ".")))
+                publish.single(topic, payload=nuevo_setpoint_str, hostname=mqtt_host, port=1883, auth=auth)
+                
+                flash(f'Setpoint actualizado a {nuevo_setpoint_str}°C')
+                logging.info(f"Comando de setpoint ({nuevo_setpoint_str}) MQTT enviado al nodo {nodo_mac}")
+
+    except Exception as e:
+        flash('Error al enviar el comando IoT')
+        logging.error(f"Error MQTT: {e}")
+
     return redirect(url_for('index'))
